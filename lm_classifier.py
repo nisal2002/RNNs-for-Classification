@@ -17,7 +17,7 @@ def _parse_args():
     :return: the parsed args bundle
     """
     parser = argparse.ArgumentParser(description='lm.py')
-    parser.add_argument('--model', type=str, default='FREQUENCY', help='model to run (FREQUENCY or RNN)')
+    parser.add_argument('--model', type=str, default='RNN', help='model to run (FREQUENCY or RNN)')
     parser.add_argument('--train_cons', type=str, default='data/train-consonant-examples.txt', help='path to train consonant examples')
     parser.add_argument('--train_vowel', type=str, default='data/train-vowel-examples.txt', help='path to train vowel examples')
     parser.add_argument('--dev_cons', type=str, default='data/dev-consonant-examples.txt', help='path to dev consonant examples')
@@ -73,8 +73,8 @@ if __name__ == '__main__':
     for char in vocab:
         vocab_index.add_and_get_index(char)
     print(repr(vocab_index))
-
-    system_to_run = args.model
+    # system_to_run = args.model
+    system_to_run="RNN"
     # Train our model
     if system_to_run == "RNN":
         model = train_rnn_classifier(args, train_cons_exs, train_vowel_exs, dev_cons_exs, dev_vowel_exs, vocab_index)
@@ -83,5 +83,5 @@ if __name__ == '__main__':
     else:
         raise Exception("Pass in either UNIFORM or LSTM to run the appropriate system")
 
-    print_evaluation(dev_cons_exs, dev_vowel_exs, model)
+    # print_evaluation(dev_cons_exs, dev_vowel_exs, model)
     # print_evaluation(train_cons_exs[0:50], train_vowel_exs[0:50], model)

@@ -2,6 +2,12 @@
 
 import numpy as np
 import collections
+import pandas as pd
+import torch
+import torch.nn as nn
+import torch.optim as optim
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler
 
 #####################
 # MODELS FOR PART 1 #
@@ -35,7 +41,14 @@ class FrequencyBasedClassifier(ConsonantVowelClassifier):
 
 class RNNClassifier(ConsonantVowelClassifier):
     def predict(self, context):
-        raise Exception("Implement me")
+        value_array=[]
+        for char in context:
+            index = self.vocab_index.index_of(char)
+            value_array.append(index)
+        X_tensor = torch.tensor(value_array, dtype=torch.float32)
+        output = ConsonantVowelClassifier(X_tensor)
+        output_class=np.argmax(output,axis=1)
+        return output_class
 
 
 def train_frequency_based_classifier(cons_exs, vowel_exs):
@@ -47,8 +60,112 @@ def train_frequency_based_classifier(cons_exs, vowel_exs):
         vowel_counts[ex[-1]] += 1
     return FrequencyBasedClassifier(consonant_counts, vowel_counts)
 
-
+def create_dataset(X, y, time_steps=1):
+    Xs, ys = [], []
+    for i in range(len(X) - time_steps):
+        Xs.append(X[i:(i + time_steps)])
+        ys.append(y[i + time_steps])
+    return np.array(Xs), np.array(ys)
 def train_rnn_classifier(args, train_cons_exs, train_vowel_exs, dev_cons_exs, dev_vowel_exs, vocab_index):
+    X=[]
+    y=[]
+
+    vowels = ['a', 'e', 'i', 'o', 'u']
+    for i in range(0,len(train_cons_exs)-2):
+        string = train_cons_exs[i]
+        value_array=[]
+        for char in string:
+            index = vocab_index.index_of(char)
+            value_array.append(index)
+        X.append(value_array)
+        
+        if vowels.__contains__(train_cons_exs[i+1][0]):
+            y.append([0])
+        else:
+            y.append([1])
+    for i in range(0,len(train_vowel_exs)-2):
+        string = train_cons_exs[i]
+        value_array=[]
+        for char in string:
+            index = vocab_index.index_of(char)
+            value_array.append(index)
+        X.append(value_array)
+        
+        if vowels.__contains__(train_cons_exs[i+1][0]):
+            y.append([0])
+        else:
+            y.append([1])
+    Xn= np.array(X)
+    yn = np.array(y)
+    time_steps=10
+    n_features =20
+    X_rnn, y_rnn = create_dataset(Xn, yn,time_steps)
+    X_reshaped = X_rnn.reshape(-1,n_features)
+    torch.manual_seed(42)
+    
+    n_output=2
+
+    scaler  = StandardScaler()
+    X_scaled = scaler.fit_transform(X_reshaped)
+
+# Reshape back to (samples, timesteps, features)
+    X_scaled = X_scaled.reshape(len(X_rnn), time_steps, n_features)
+
+    X_train, X_test, y_train, y_test = train_test_split(X_rnn, y_rnn, test_size=0.2, random_state=42,shuffle=True)
+    X_train_tensor = torch.tensor(X_train, dtype=torch.float32)
+    y_train_tensor = torch.tensor(y_train, dtype=torch.float32)
+    X_test_tensor = torch.tensor(X_test, dtype=torch.float32)
+    y_test_tensor = torch.tensor(y_test, dtype=torch.float32)
+
+    class RNNModel(nn.Module):
+        def __init__(self, input_size, hidden_size, output_size):
+            super(RNNModel, self).__init__()
+            self.rnn = nn.RNN(input_size, hidden_size, batch_first=True)
+            self.fc = nn.Linear(hidden_size, output_size)
+
+        def forward(self, x):
+            out, _ = self.rnn(x)
+            out = out[:, -1, :] 
+            out = self.fc(out)  
+            return out
+
+    hidden_size = 50 
+    epochs = 50   
+    learning_rate = 0.001
+    model = RNNModel(input_size=n_features, hidden_size=hidden_size, output_size=n_output)
+    criterion = nn.MSELoss()
+    optimizer = optim.Adam(model.parameters(), lr=learning_rate)
+    for epoch in range(epochs):
+        model.train()
+        optimizer.zero_grad()  # Zero the gradients
+
+        # Forward pass
+        outputs = model(X_train_tensor)
+        print(outputs.shape)
+        print(y_train_tensor.shape)
+        loss = criterion(outputs, y_train_tensor)
+
+        # Backward pass and optimization
+        loss.backward()
+        optimizer.step()
+
+        if (epoch + 1) % 10 == 0:
+            print(f'Epoch [{epoch + 1}/{epochs}], Loss: {loss.item():.4f}')
+    
+    model.eval()
+    with torch.no_grad():
+        test_outputs = model(X_test_tensor)
+        test_loss = criterion(test_outputs, y_test_tensor)
+        print(f'Test Loss: {test_loss.item():.4f}')
+
+    predictions = test_outputs.numpy()
+    print("Predictions for first 5 samples:\n", predictions[:5])    
+    class_labels = np.argmax(predictions, axis=1) 
+    print(class_labels)
+    
+
+
+
     """
     :param args: command-line args, passed through here for your convenience
     :param train_cons_exs: list of strings followed by consonants
@@ -58,7 +175,7 @@ def train_rnn_classifier(args, train_cons_exs, train_vowel_exs, dev_cons_exs, de
     :param vocab_index: an Indexer of the character vocabulary (27 characters)
     :return: an RNNClassifier instance trained on the given data
     """
-    raise Exception("Implement me")
+    
 
 
 #####################
