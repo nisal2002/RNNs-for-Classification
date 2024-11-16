@@ -43,24 +43,33 @@ class FrequencyBasedClassifier(ConsonantVowelClassifier):
 
 
 class RNNClassifier(ConsonantVowelClassifier):
-    def __init__(self, input_size, hidden_size, output_size):
+    def __init__(self, input_size, hidden_size, output_size,vocab_index):
             super(RNNClassifier,self).__init__()
             self.rnn = nn.RNN(input_size, hidden_size, batch_first=True)
             self.fc = nn.Linear(hidden_size, output_size)
+            self.vocab_index = vocab_index
 
     def forward(self, x):
-            out, _ = self.rnn(x)
+        out, _ = self.rnn(x)  
+        # Check the output shape
+        if out.dim() == 3:  
             out = out[:, -1, :] 
-            out = self.fc(out)  
-            return out
+        elif out.dim() == 2:
+            pass 
+        else:
+            raise ValueError(f"Unexpected output shape: {out.shape}")
+        
+        out = self.fc(out)  # Pass through the fully connected layer
+        return out
     def predict(self, context):
         value_array=[]
         for char in context:
             index = self.vocab_index.index_of(char)
             value_array.append(index)
-        X_tensor = torch.tensor(value_array, dtype=torch.float32)
-        output = ConsonantVowelClassifier(X_tensor)
-        output_class=np.argmax(output,axis=1)
+        X_tensor = torch.tensor(value_array, dtype=torch.float32).unsqueeze(0)
+        X_tensor = X_tensor.unsqueeze(1)
+        output = self.forward(X_tensor)
+        output_class = np.argmax(output.detach().numpy(), axis=1)
         return output_class
 
 
@@ -95,9 +104,9 @@ def train_rnn_classifier(args, train_cons_exs, train_vowel_exs, dev_cons_exs, de
         X.append(value_array)
         
         if vowels.__contains__(train_cons_exs[i+1][0]):
-            y.append([0])
-        else:
             y.append([1])
+        else:
+            y.append([0])
     for i in range(0,len(train_vowel_exs)-2):
         string = train_cons_exs[i]
         value_array=[]
@@ -107,9 +116,9 @@ def train_rnn_classifier(args, train_cons_exs, train_vowel_exs, dev_cons_exs, de
         X.append(value_array)
         
         if vowels.__contains__(train_cons_exs[i+1][0]):
-            y.append([0])
-        else:
             y.append([1])
+        else:
+            y.append([0])
     Xn= np.array(X)
     yn = np.array(y)
     time_steps=10
@@ -134,9 +143,9 @@ def train_rnn_classifier(args, train_cons_exs, train_vowel_exs, dev_cons_exs, de
         
 
     hidden_size = 50 
-    epochs = 50   
-    learning_rate = 0.001
-    model = RNNClassifier(input_size=n_features, hidden_size=hidden_size, output_size=n_output)
+    epochs = 100   
+    learning_rate = 0.006
+    model = RNNClassifier(input_size=n_features, hidden_size=hidden_size, output_size=n_output,vocab_index=vocab_index)
     criterion = nn.MSELoss()
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
     for epoch in range(epochs):
