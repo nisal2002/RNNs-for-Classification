@@ -50,13 +50,12 @@ class RNNClassifier(ConsonantVowelClassifier):
             self.vocab_index = vocab_index
 
     def forward(self, x):
-        out, _ = self.rnn(x)  # Forward pass through RNN
+        out, _ = self.rnn(x)  
         # Check the output shape
-        if out.dim() == 3:  # Expected shape (batch_size, sequence_length, hidden_size)
-            out = out[:, -1, :]  # Get the last time step output
-        elif out.dim() == 2:  # If shape is (batch_size, hidden_size)
-            # In this case, you might have only one time step, so you can use out directly
-            pass  # out already has the shape (batch_size, hidden_size)
+        if out.dim() == 3:  
+            out = out[:, -1, :] 
+        elif out.dim() == 2:
+            pass 
         else:
             raise ValueError(f"Unexpected output shape: {out.shape}")
         
