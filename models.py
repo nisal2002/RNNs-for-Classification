@@ -8,12 +8,15 @@ import torch.nn as nn
 import torch.optim as optim
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
-
+from torch.utils.data import DataLoader, Dataset,TensorDataset
+import re
 #####################
 # MODELS FOR PART 1 #
 #####################
 
-class ConsonantVowelClassifier(object):
+class ConsonantVowelClassifier(nn.Module):
+    def __init__(self):
+        super(ConsonantVowelClassifier, self).__init__()
     def predict(self, context):
         """
         :param context:
@@ -40,6 +43,16 @@ class FrequencyBasedClassifier(ConsonantVowelClassifier):
 
 
 class RNNClassifier(ConsonantVowelClassifier):
+    def __init__(self, input_size, hidden_size, output_size):
+            super(RNNClassifier,self).__init__()
+            self.rnn = nn.RNN(input_size, hidden_size, batch_first=True)
+            self.fc = nn.Linear(hidden_size, output_size)
+
+    def forward(self, x):
+            out, _ = self.rnn(x)
+            out = out[:, -1, :] 
+            out = self.fc(out)  
+            return out
     def predict(self, context):
         value_array=[]
         for char in context:
@@ -66,6 +79,8 @@ def create_dataset(X, y, time_steps=1):
         Xs.append(X[i:(i + time_steps)])
         ys.append(y[i + time_steps])
     return np.array(Xs), np.array(ys)
+
+
 def train_rnn_classifier(args, train_cons_exs, train_vowel_exs, dev_cons_exs, dev_vowel_exs, vocab_index):
     X=[]
     y=[]
@@ -107,8 +122,6 @@ def train_rnn_classifier(args, train_cons_exs, train_vowel_exs, dev_cons_exs, de
 
     scaler  = StandardScaler()
     X_scaled = scaler.fit_transform(X_reshaped)
-
-# Reshape back to (samples, timesteps, features)
     X_scaled = X_scaled.reshape(len(X_rnn), time_steps, n_features)
 
     X_train, X_test, y_train, y_test = train_test_split(X_rnn, y_rnn, test_size=0.2, random_state=42,shuffle=True)
@@ -117,22 +130,13 @@ def train_rnn_classifier(args, train_cons_exs, train_vowel_exs, dev_cons_exs, de
     X_test_tensor = torch.tensor(X_test, dtype=torch.float32)
     y_test_tensor = torch.tensor(y_test, dtype=torch.float32)
 
-    class RNNModel(nn.Module):
-        def __init__(self, input_size, hidden_size, output_size):
-            super(RNNModel, self).__init__()
-            self.rnn = nn.RNN(input_size, hidden_size, batch_first=True)
-            self.fc = nn.Linear(hidden_size, output_size)
-
-        def forward(self, x):
-            out, _ = self.rnn(x)
-            out = out[:, -1, :] 
-            out = self.fc(out)  
-            return out
+    # class RNNModel(nn.Module):
+        
 
     hidden_size = 50 
     epochs = 50   
     learning_rate = 0.001
-    model = RNNModel(input_size=n_features, hidden_size=hidden_size, output_size=n_output)
+    model = RNNClassifier(input_size=n_features, hidden_size=hidden_size, output_size=n_output)
     criterion = nn.MSELoss()
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
     for epoch in range(epochs):
@@ -158,10 +162,7 @@ def train_rnn_classifier(args, train_cons_exs, train_vowel_exs, dev_cons_exs, de
         test_loss = criterion(test_outputs, y_test_tensor)
         print(f'Test Loss: {test_loss.item():.4f}')
 
-    predictions = test_outputs.numpy()
-    print("Predictions for first 5 samples:\n", predictions[:5])    
-    class_labels = np.argmax(predictions, axis=1) 
-    print(class_labels)
+    return model
     
 
 
@@ -183,7 +184,9 @@ def train_rnn_classifier(args, train_cons_exs, train_vowel_exs, dev_cons_exs, de
 #####################
 
 
-class LanguageModel(object):
+class LanguageModel(nn.Module):
+    def __init__(self):
+        super(LanguageModel, self).__init__()
 
     def get_log_prob_single(self, next_char, context):
         """
@@ -221,24 +224,102 @@ class UniformLanguageModel(LanguageModel):
 
 
 class RNNLanguageModel(LanguageModel):
-    def __init__(self, model_emb, model_dec, vocab_index):
-        self.model_emb = model_emb
-        self.model_dec = model_dec
+    def __init__(self,vocab_index, embedding_dim, hidden_dim):
+        super(RNNLanguageModel, self).__init__()
+        self.embedding =  nn.Embedding(len(vocab_index), embedding_dim)
+        self.model_dec = nn.RNN(embedding_dim, hidden_dim, batch_first=True)
+        self.fc = nn.Linear(hidden_dim, len(vocab_index))
+        # self.model_dec = model_dec
         self.vocab_index = vocab_index
 
     def get_log_prob_single(self, next_char, context):
-        raise Exception("Implement me")
+        self.eval()  
+        # context_indices = [self.vocab_index[char] for char in context]
+        context_indices=[]
+        for char in context:
+            index = self.vocab_index.index_of(char)
+            context_indices.append(index)
+        context_tensor = torch.tensor(context_indices, dtype=torch.long).unsqueeze(0) 
+        embedded = self.embedding(context_tensor)  
+        rnn_out, _ = self.model_dec(embedded)
+        last_output = rnn_out[:, -1, :]  # Shape: (1, hidden_dim)
+        logits = self.fc(last_output)  
+        log_probs = torch.nn.functional.log_softmax(logits, dim=1)  
+        target_idx = self.vocab_index.index_of(next_char)
+        return log_probs[0, target_idx].item()  # Convert tensor to float
 
     def get_log_prob_sequence(self, next_chars, context):
-        raise Exception("Implement me")
+        total_log_prob = 0.0
 
+        for i in range(len(next_chars)):
 
+            current_context = context + next_chars[:i]
+            next_char = next_chars[i]  
+            log_prob = self.get_log_prob_single(next_char, current_context)
+            total_log_prob += log_prob
+        
+        return total_log_prob
+    
+    def forward(self, x):
+        embedded = self.embedding(x)  
+        rnn_out, _ = self.model_dec(embedded) 
+        output = self.fc(rnn_out[:, -1, :])  
+        return output 
+
+ 
 def train_lm(args, train_text, dev_text, vocab_index):
-    """
-    :param args: command-line args, passed through here for your convenience
-    :param train_text: train text as a sequence of characters
-    :param dev_text: dev texts as a sequence of characters
-    :param vocab_index: an Indexer of the character vocabulary (27 characters)
-    :return: an RNNLanguageModel instance trained on the given data
-    """
-    raise Exception("Implement me")
+    vocab_size = len(vocab_index)  
+    embedding_dim = 128 
+    hidden_dim = 256  
+    num_layers = 1
+    batch_size = 32
+    learning_rate=0.005
+    num_epochs=150
+    sequence_length=10
+
+    
+    train_text = train_text.lower() 
+    train_text = re.sub(r'[^a-z ]', ' ', train_text)
+
+    X=[]
+    y=[]
+    for i in range(len(train_text)-sequence_length):
+        sequence = train_text[i:i+sequence_length]
+        target = train_text[i+sequence_length]
+        index=[]
+        for char in sequence:
+            index_of_char = vocab_index.index_of(char)
+            index.append(index_of_char)
+        target_index = vocab_index.index_of(target)
+        X.append(index)
+        y.append(target_index)
+
+    
+    
+    X_tensor =torch.tensor(X, dtype= torch.long) # was dtype = torch.long
+    y_tensor = torch.tensor(y,dtype= torch.long)
+    dataset = TensorDataset(X_tensor,y_tensor)
+    data_loader = DataLoader(dataset,batch_size=batch_size,shuffle=True)
+    model = RNNLanguageModel(vocab_index, embedding_dim, hidden_dim)
+    model.train()
+    optimizer = optim.Adam(model.parameters(), lr=learning_rate)
+    criterion = nn.CrossEntropyLoss()
+    
+    
+    for epoch in range(num_epochs):
+        total_loss = 0
+        for inputs,targets in data_loader:
+            optimizer.zero_grad()  
+            outputs = model(inputs)  
+            loss = criterion(outputs, targets)  
+            loss.backward() 
+            optimizer.step() 
+            total_loss += loss.item()
+        
+        if (epoch + 1) % 50 == 0:
+            print(f'Epoch [{epoch + 1}/{num_epochs}], Loss: {total_loss / len(data_loader):.4f}')
+    
+    return model
+
+
+
