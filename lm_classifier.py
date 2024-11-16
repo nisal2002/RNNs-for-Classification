@@ -78,6 +78,7 @@ if __name__ == '__main__':
     # Train our model
     if system_to_run == "RNN":
         model = train_rnn_classifier(args, train_cons_exs, train_vowel_exs, dev_cons_exs, dev_vowel_exs, vocab_index)
+        print_evaluation(dev_cons_exs, dev_vowel_exs, model)
     elif system_to_run == "FREQUENCY":
         model = train_frequency_based_classifier(train_cons_exs, train_vowel_exs)
     else:
