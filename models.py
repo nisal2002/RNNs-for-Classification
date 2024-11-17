@@ -185,7 +185,7 @@ def train_rnn_classifier(args, train_cons_exs, train_vowel_exs, dev_cons_exs, de
 
             average_validation_loss = validation_loss / (len(dev_cons_exs) + len(dev_vowel_exs))
             accuracy = correct_predictions / total_predictions
-            print(f"Validation Loss: {average_validation_loss:.4f}, Accuracy: {accuracy * 100:.2f}%")
+            print(f"Validation Loss: {average_validation_loss:.4f}, Accuracy: {accuracy * 100:.2f}%")  # Print validation results
 
     return model
 
