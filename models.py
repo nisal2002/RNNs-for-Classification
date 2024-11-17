@@ -42,34 +42,54 @@ class FrequencyBasedClassifier(ConsonantVowelClassifier):
             return 1
 
 
+def train_frequency_based_classifier(cons_exs, vowel_exs):
+    consonant_counts = collections.Counter()
+    vowel_counts = collections.Counter()
+    for ex in cons_exs:
+        consonant_counts[ex[-1]] += 1
+    for ex in vowel_exs:
+        vowel_counts[ex[-1]] += 1
+    return FrequencyBasedClassifier(consonant_counts, vowel_counts)
+
 class RNNClassifier(ConsonantVowelClassifier):
-    def __init__(self, input_size, hidden_size, output_size,vocab_index):
+    def __init__(self,embedding_dim, input_size, hidden_size, output_size,vocab_index):
             super(RNNClassifier,self).__init__()
-            self.rnn = nn.RNN(input_size, hidden_size, batch_first=True)
-            self.fc = nn.Linear(hidden_size, output_size)
+            self.embedding = nn.Embedding(len(vocab_index),embedding_dim)
+            self.rnn = nn.GRU(embedding_dim, hidden_size, batch_first=True,num_layers=1,bidirectional=True)
+            self.fc = nn.Linear(hidden_size*2, output_size)
             self.vocab_index = vocab_index
 
     def forward(self, x):
-        out, _ = self.rnn(x)  
-        # Check the output shape
-        if out.dim() == 3:  
-            out = out[:, -1, :] 
-        elif out.dim() == 2:
-            pass 
-        else:
-            raise ValueError(f"Unexpected output shape: {out.shape}")
-        
-        out = self.fc(out)  # Pass through the fully connected layer
-        return out
+        embedded = self.embedding(x)  # Shape: (batch_size, sequence_length, embedding_dim)
+        # Pass through the GRU
+        output, hidden_layer = self.rnn(embedded)  # Shape: (batch_size, sequence_length, hidden_size * 2)
+
+        # Get the last forward and backward hidden states
+        if isinstance(hidden_layer, tuple):
+            hidden_layer = hidden_layer[0]
+
+        forward_hidden_layer = hidden_layer[-2, :, :]  # Last forward hidden state
+        backward_hidden_layer = hidden_layer[-1, :, :]  # Last backward hidden state
+
+        # Concatenate the last hidden states
+        final_hidden_layer = torch.cat((forward_hidden_layer, backward_hidden_layer), dim=1)
+
+        # Pass the concatenated hidden layer through the fully connected layer
+        logits = self.fc(final_hidden_layer)  # Output shape: (batch_size, output_size)
+
+        return logits
     def predict(self, context):
         value_array=[]
         for char in context:
             index = self.vocab_index.index_of(char)
             value_array.append(index)
-        X_tensor = torch.tensor(value_array, dtype=torch.float32).unsqueeze(0)
-        X_tensor = X_tensor.unsqueeze(1)
+        
+        X_tensor = torch.tensor(value_array, dtype=torch.long).unsqueeze(0)
+
+        # X_tensor = X_tensor.unsqueeze(1)
         output = self.forward(X_tensor)
         output_class = np.argmax(output.detach().numpy(), axis=1)
+        print(output_class)
         return output_class
 
 
@@ -91,6 +111,10 @@ def create_dataset(X, y, time_steps=1):
 
 
 def train_rnn_classifier(args, train_cons_exs, train_vowel_exs, dev_cons_exs, dev_vowel_exs, vocab_index):
+    # train_cons_exs = train_cons_exs.lower() 
+    # train_cons_exs = re.sub(r'[^a-z ]', ' ', train_cons_exs)
+    # train_vowel_exs = train_vowel_exs.lower() 
+    # train_vowel_exs = re.sub(r'[^a-z ]', ' ', train_vowel_exs)
     X=[]
     y=[]
 
@@ -108,68 +132,90 @@ def train_rnn_classifier(args, train_cons_exs, train_vowel_exs, dev_cons_exs, de
         else:
             y.append([0])
     for i in range(0,len(train_vowel_exs)-2):
-        string = train_cons_exs[i]
+        string = train_vowel_exs[i]
         value_array=[]
         for char in string:
             index = vocab_index.index_of(char)
             value_array.append(index)
         X.append(value_array)
         
-        if vowels.__contains__(train_cons_exs[i+1][0]):
+        if vowels.__contains__(train_vowel_exs[i+1][0]):
             y.append([1])
         else:
             y.append([0])
     Xn= np.array(X)
-    yn = np.array(y)
-    time_steps=10
+    yn = np.array(y).flatten()
+    time_steps=5
     n_features =20
     X_rnn, y_rnn = create_dataset(Xn, yn,time_steps)
-    X_reshaped = X_rnn.reshape(-1,n_features)
+    # X_reshaped = X_rnn.reshape(-1,n_features)
     torch.manual_seed(42)
     
-    n_output=2
-
-    scaler  = StandardScaler()
-    X_scaled = scaler.fit_transform(X_reshaped)
-    X_scaled = X_scaled.reshape(len(X_rnn), time_steps, n_features)
-
-    X_train, X_test, y_train, y_test = train_test_split(X_rnn, y_rnn, test_size=0.2, random_state=42,shuffle=True)
-    X_train_tensor = torch.tensor(X_train, dtype=torch.float32)
-    y_train_tensor = torch.tensor(y_train, dtype=torch.float32)
-    X_test_tensor = torch.tensor(X_test, dtype=torch.float32)
-    y_test_tensor = torch.tensor(y_test, dtype=torch.float32)
-
+    
+    X_train, X_test, y_train, y_test = train_test_split(Xn, yn, test_size=0.1, random_state=42,shuffle=True)
+    X_train_tensor = torch.tensor(X_train, dtype=torch.long)
+    y_train_tensor = torch.tensor(y_train, dtype=torch.long)
+    X_test_tensor = torch.tensor(X_test, dtype=torch.long)
+    y_test_tensor = torch.tensor(y_test, dtype=torch.long)
+    # X_train_tensor = X_train_tensor.squeeze(0)
     # class RNNModel(nn.Module):
         
 
-    hidden_size = 50 
-    epochs = 100   
-    learning_rate = 0.006
-    model = RNNClassifier(input_size=n_features, hidden_size=hidden_size, output_size=n_output,vocab_index=vocab_index)
-    criterion = nn.MSELoss()
-    optimizer = optim.Adam(model.parameters(), lr=learning_rate)
+    hidden_size = 256 
+    embedding_size=32
+    epochs = 50   
+    learning_rate = 0.009
+    n_output=2
+    model = RNNClassifier(embedding_dim=embedding_size,input_size=n_features, hidden_size=hidden_size, output_size=n_output,vocab_index=vocab_index)
+    criterion = nn.CrossEntropyLoss()
+    optimizer = optim.Adam(model.parameters(),lr=learning_rate)#add lr
+    total_loss=0
     for epoch in range(epochs):
         model.train()
         optimizer.zero_grad()  # Zero the gradients
 
-        # Forward pass
-        outputs = model(X_train_tensor)
-        print(outputs.shape)
-        print(y_train_tensor.shape)
-        loss = criterion(outputs, y_train_tensor)
+        # # Forward pass
+        # outputs = model(X_train_tensor)
+        # print(outputs.shape)
+        # print(y_train_tensor.shape)
+        # loss = criterion(outputs, y_train_tensor)
 
-        # Backward pass and optimization
+        # # Backward pass and optimization
+        # loss.backward()
+        # optimizer.step()
+        optimizer.zero_grad()
+        # print(X_train_tensor.shape)
+        logits = model.forward(X_train_tensor)
+        loss = criterion(logits,y_train_tensor)
         loss.backward()
         optimizer.step()
+        total_loss += loss.item()
 
-        if (epoch + 1) % 10 == 0:
-            print(f'Epoch [{epoch + 1}/{epochs}], Loss: {loss.item():.4f}')
-    
+        _, predicted_classes = torch.max(logits, 1)  # Get predicted classes
+        correct_predictions = (predicted_classes == y_train_tensor).sum().item()  # Count correct predictions
+        total_predictions = y_train_tensor.size(0)  # Total number of samples
+        accuracy = correct_predictions / total_predictions  # Calculate accuracy
+
+        # Print loss and accuracy every 10 epochs
+        print(f'Epoch [{epoch + 1}/{epochs}], Loss: {loss.item():.4f}, Accuracy: {accuracy * 100:.2f}%')
+        # if (epoch + 1) % 10 == 0:
+        #     print(f'Epoch [{epoch + 1}/{epochs}], Loss: {loss.item():.4f}, Accuracy: {accuracy * 100:.2f}%')
+        
     model.eval()
     with torch.no_grad():
         test_outputs = model(X_test_tensor)
         test_loss = criterion(test_outputs, y_test_tensor)
         print(f'Test Loss: {test_loss.item():.4f}')
+
+        _, predicted_classes = torch.max(test_outputs, 1)  # Get indices of the max log-probability
+
+        # Calculate accuracy
+        correct_predictions = (predicted_classes == y_test_tensor).sum().item()
+        print(correct_predictions)  # Count correct predictions
+        total_predictions = y_test_tensor.size(0)  # Total number of samples
+        accuracy = correct_predictions / total_predictions  # Calculate accuracy
+
+        print(f'Test Accuracy: {accuracy * 100:.2f}%') 
 
     return model
     

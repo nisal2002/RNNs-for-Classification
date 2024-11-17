@@ -60,7 +60,7 @@ if __name__ == '__main__':
     dev_text = read_text(args.dev_path)
 
     #for debugging
-    # train_text = train_text[0:500]
+    train_text = train_text[0:500]
 
     # Vocabs is lowercase letters a to z and space
     vocab = [chr(ord('a') + i) for i in range(0, 26)] + [' ']
@@ -75,6 +75,7 @@ if __name__ == '__main__':
     # Train our model
     if system_to_run == "RNN":
         model = train_lm(args, train_text, dev_text, vocab_index)
+        print_evaluation('hello world my name i',model)
     elif system_to_run == "UNIFORM":
         model = UniformLanguageModel(len(vocab))
     else:
