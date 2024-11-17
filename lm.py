@@ -17,7 +17,7 @@ def _parse_args():
     :return: the parsed args bundle
     """
     parser = argparse.ArgumentParser(description='lm.py')
-    parser.add_argument('--model', type=str, default='UNIFORM', help='model to run (UNIFORM or RNN)')
+    parser.add_argument('--model', type=str, default='RNN', help='model to run (UNIFORM or RNN)')
     parser.add_argument('--train_path', type=str, default='data/text8-100k.txt', help='path to train set (you should not need to modify)')
     parser.add_argument('--dev_path', type=str, default='data/text8-dev.txt', help='path to dev set (you should not need to modify)')
     args = parser.parse_args()
@@ -59,6 +59,9 @@ if __name__ == '__main__':
     train_text = read_text(args.train_path)
     dev_text = read_text(args.dev_path)
 
+    #for debugging
+    train_text = train_text[0:500]
+
     # Vocabs is lowercase letters a to z and space
     vocab = [chr(ord('a') + i) for i in range(0, 26)] + [' ']
     vocab_index = Indexer()
@@ -72,6 +75,7 @@ if __name__ == '__main__':
     # Train our model
     if system_to_run == "RNN":
         model = train_lm(args, train_text, dev_text, vocab_index)
+        print_evaluation('hello world my name i',model)
     elif system_to_run == "UNIFORM":
         model = UniformLanguageModel(len(vocab))
     else:

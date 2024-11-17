@@ -49,10 +49,10 @@ def print_evaluation(dev_consonant_exs, dev_vowel_exs, model):
     """
     num_correct = 0
     for ex in dev_consonant_exs:
-        if model.predict(ex) == 0:
+        if model.predict(ex) == 1:
             num_correct += 1
     for ex in dev_vowel_exs:
-        if model.predict(ex) == 1:
+        if model.predict(ex) == 0:
             num_correct += 1
     num_total = len(dev_consonant_exs) + len(dev_vowel_exs)
     print("%i correct / %i total = %.3f percent accuracy" % (num_correct, num_total, float(num_correct)/num_total * 100.0))
@@ -78,6 +78,7 @@ if __name__ == '__main__':
     # Train our model
     if system_to_run == "RNN":
         model = train_rnn_classifier(args, train_cons_exs, train_vowel_exs, dev_cons_exs, dev_vowel_exs, vocab_index)
+        print_evaluation(dev_cons_exs, dev_vowel_exs, model)
     elif system_to_run == "FREQUENCY":
         model = train_frequency_based_classifier(train_cons_exs, train_vowel_exs)
     else:

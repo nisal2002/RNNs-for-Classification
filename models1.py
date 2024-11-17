@@ -2,18 +2,14 @@
 
 import numpy as np
 import collections
-import pandas as pd
-import torch
+import torch as torch
 import torch.nn as nn
 import torch.optim as optim
-from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import StandardScaler
-from torch.utils.data import DataLoader, Dataset,TensorDataset
-import re
+import math
+
 #####################
 # MODELS FOR PART 1 #
 #####################
-
 
 class ConsonantVowelClassifier(object):
     def predict(self, context):
@@ -39,6 +35,8 @@ class FrequencyBasedClassifier(ConsonantVowelClassifier):
             return 0
         else:
             return 1
+
+
 class RNNClassifier(ConsonantVowelClassifier, nn.Module):
 
     def __init__(self, embedding_layer, rnn, output,vocabulary, context_length):
@@ -90,6 +88,7 @@ def train_frequency_based_classifier(cons_exs, vowel_exs):
     for ex in vowel_exs:
         vowel_counts[ex[-1]] += 1
     return FrequencyBasedClassifier(consonant_counts, vowel_counts)
+
 
 def train_rnn_classifier(args, train_cons_exs, train_vowel_exs, dev_cons_exs, dev_vowel_exs, vocab_index):
     """
@@ -177,22 +176,19 @@ def train_rnn_classifier(args, train_cons_exs, train_vowel_exs, dev_cons_exs, de
             accuracy = correct_predictions / total_predictions
             print(f"Validation Loss: {average_validation_loss:.4f}, Accuracy: {accuracy * 100:.2f}%")
 
+            # # early stopping
+            # if average_validation_loss < best_validation_loss:
+            #     best_validation_loss = average_validation_loss
+            #     epochs_without_improvement = 0
+            #     torch.save(model.state_dict(), 'best_model.pth')
+            # else:
+            #     epochs_without_improvement +=1
+
+            #     if epochs_without_improvement >= patience:
+            #         print(f"Early stopping triggered after {patience} epochs without improvement.")
+            #         break
 
     return model
-    
-
-
-
-    """
-    :param args: command-line args, passed through here for your convenience
-    :param train_cons_exs: list of strings followed by consonants
-    :param train_vowel_exs: list of strings followed by vowels
-    :param dev_cons_exs: list of strings followed by consonants
-    :param dev_vowel_exs: list of strings followed by vowels
-    :param vocab_index: an Indexer of the character vocabulary (27 characters)
-    :return: an RNNClassifier instance trained on the given data
-    """
-    
 
 
 #####################
@@ -200,9 +196,7 @@ def train_rnn_classifier(args, train_cons_exs, train_vowel_exs, dev_cons_exs, de
 #####################
 
 
-class LanguageModel(nn.Module):
-    def __init__(self):
-        super(LanguageModel, self).__init__()
+class LanguageModel(object):
 
     def get_log_prob_single(self, next_char, context):
         """
@@ -239,103 +233,81 @@ class UniformLanguageModel(LanguageModel):
         return np.log(1.0/self.voc_size) * len(next_chars)
 
 
-class RNNLanguageModel(LanguageModel):
-    def __init__(self,vocab_index, embedding_dim, hidden_dim):
+class RNNLanguageModel(LanguageModel, nn.Module):
+    def __init__(self, vocab_size, embed_size, hidden_size, vocab_index):
         super(RNNLanguageModel, self).__init__()
-        self.embedding =  nn.Embedding(len(vocab_index), embedding_dim)
-        self.model_dec = nn.RNN(embedding_dim, hidden_dim, batch_first=True)
-        self.fc = nn.Linear(hidden_dim, len(vocab_index))
-        # self.model_dec = model_dec
+        self.embedding = nn.Embedding(vocab_size, embed_size)
+        self.rnn = nn.LSTM(embed_size, hidden_size, batch_first=True)
+        self.fc = nn.Linear(hidden_size, vocab_size)
         self.vocab_index = vocab_index
 
+    def forward(self, x):
+        x = self.embedding(x)
+        out, _ = self.rnn(x)
+        out = self.fc(out)
+        return out
+
     def get_log_prob_single(self, next_char, context):
-        self.eval()  
-        # context_indices = [self.vocab_index[char] for char in context]
-        context_indices=[]
-        for char in context:
-            index = self.vocab_index.index_of(char)
-            context_indices.append(index)
-        context_tensor = torch.tensor(context_indices, dtype=torch.long).unsqueeze(0) 
-        embedded = self.embedding(context_tensor)  
-        rnn_out, _ = self.model_dec(embedded)
-        last_output = rnn_out[:, -1, :]  # Shape: (1, hidden_dim)
-        logits = self.fc(last_output)  
-        log_probs = torch.nn.functional.log_softmax(logits, dim=1)  
-        target_idx = self.vocab_index.index_of(next_char)
-        return log_probs[0, target_idx].item()  # Convert tensor to float
+        indices = [self.vocab_index.index_of(c) for c in context]
+        inputs = torch.tensor(indices).unsqueeze(0)
+        output = self.forward(inputs)[:, -1, :]
+        next_char_index = self.vocab_index.index_of(next_char)
+        log_prob = torch.log_softmax(output, dim=-1)[0, next_char_index]
+        return log_prob.item()
 
     def get_log_prob_sequence(self, next_chars, context):
-        total_log_prob = 0.0
+        log_prob = 0.0
+        for next_char in next_chars:
+            log_prob += self.get_log_prob_single(next_char, context)
+            context += next_char
+        return log_prob
 
-        for i in range(len(next_chars)):
 
-            current_context = context + next_chars[:i]
-            next_char = next_chars[i]  
-            log_prob = self.get_log_prob_single(next_char, current_context)
-            total_log_prob += log_prob
-        
-        return total_log_prob
-    
-    def forward(self, x):
-        embedded = self.embedding(x)  
-        rnn_out, _ = self.model_dec(embedded) 
-        output = self.fc(rnn_out[:, -1, :])  
-        return output 
 
- 
 def train_lm(args, train_text, dev_text, vocab_index):
-    vocab_size = len(vocab_index)  
-    embedding_dim = 128 
-    hidden_dim = 256  
-    num_layers = 1
-    batch_size = 32
-    learning_rate=0.005
-    num_epochs=150
-    sequence_length=10
+    vocab_size = len(vocab_index)
+    embed_size = 32
+    hidden_size = 64
+    num_epochs = 3
+    learning_rate = 0.001
 
-    
-    train_text = train_text.lower() 
-    train_text = re.sub(r'[^a-z ]', ' ', train_text)
-
-    X=[]
-    y=[]
-    for i in range(len(train_text)-sequence_length):
-        sequence = train_text[i:i+sequence_length]
-        target = train_text[i+sequence_length]
-        index=[]
-        for char in sequence:
-            index_of_char = vocab_index.index_of(char)
-            index.append(index_of_char)
-        target_index = vocab_index.index_of(target)
-        X.append(index)
-        y.append(target_index)
-
-    
-    
-    X_tensor =torch.tensor(X, dtype= torch.long) # was dtype = torch.long
-    y_tensor = torch.tensor(y,dtype= torch.long)
-    dataset = TensorDataset(X_tensor,y_tensor)
-    data_loader = DataLoader(dataset,batch_size=batch_size,shuffle=True)
-    model = RNNLanguageModel(vocab_index, embedding_dim, hidden_dim)
-    model.train()
-    optimizer = optim.Adam(model.parameters(), lr=learning_rate)
+    model = RNNLanguageModel(vocab_size, embed_size, hidden_size, vocab_index)
     criterion = nn.CrossEntropyLoss()
-    
-    
+    optimizer = optim.Adam(model.parameters(), lr=learning_rate)
+
+    train_indices = [vocab_index.index_of(char) for char in train_text]
+    dev_indices = [vocab_index.index_of(char) for char in dev_text]
+
     for epoch in range(num_epochs):
+        model.train()
         total_loss = 0
-        for inputs,targets in data_loader:
-            optimizer.zero_grad()  
-            outputs = model(inputs)  
-            loss = criterion(outputs, targets)  
-            loss.backward() 
-            optimizer.step() 
+        hidden = None
+        for i in range(len(train_indices) - 1):
+            inputs = torch.tensor([train_indices[i]]).unsqueeze(0)
+            labels = torch.tensor([train_indices[i + 1]])
+
+            optimizer.zero_grad()
+            outputs = model(inputs)
+            loss = criterion(outputs.squeeze(0), labels)
+            loss.backward()
+            optimizer.step()
             total_loss += loss.item()
-        
-        if (epoch + 1) % 50 == 0:
-            print(f'Epoch [{epoch + 1}/{num_epochs}], Loss: {total_loss / len(data_loader):.4f}')
-    
+
+        avg_train_loss = total_loss / (len(train_indices) - 1)
+        print(f'Epoch [{epoch + 1}/{num_epochs}], Loss: {avg_train_loss:.4f}')
+
+        model.eval()
+        with torch.no_grad():
+            total_val_loss = 0
+            for i in range(len(dev_indices) - 1):
+                inputs = torch.tensor([dev_indices[i]]).unsqueeze(0)
+                labels = torch.tensor([dev_indices[i + 1]])
+
+                outputs = model(inputs)
+                val_loss = criterion(outputs.squeeze(0), labels)
+                total_val_loss += val_loss.item()
+
+            avg_val_loss = total_val_loss / (len(dev_indices) - 1)
+            print(f"Validation Loss after Epoch [{epoch + 1}/{num_epochs}]: {avg_val_loss:.4f}")
+
     return model
-
-
-
