@@ -205,13 +205,12 @@ class UniformLanguageModel(LanguageModel):
 
 
 class RNNLanguageModel(LanguageModel):
-    def __init__(self, vocab_index, embedding_dim, hidden_dim,dropout_prob=0.3):
+    def __init__(self, vocab_index, embedding_dim, hidden_dim,dropout_prob=0.5):
         super(RNNLanguageModel, self).__init__()
         self.embedding = nn.Embedding(len(vocab_index), embedding_dim)
         self.dropout = nn.Dropout(dropout_prob)  # Add dropout layer
         self.model_dec = nn.RNN(embedding_dim, hidden_dim, batch_first=True)
         self.fc = nn.Linear(hidden_dim, len(vocab_index))
-        # self.model_dec = model_dec
         self.vocab_index = vocab_index
 
 
@@ -245,9 +244,9 @@ class RNNLanguageModel(LanguageModel):
 
     def forward(self, x):
         embedded = self.embedding(x)
-        embedded = self.dropout(embedded)  # Apply dropout to embedding
+        embedded = self.dropout(embedded)  # Dropout to embedding
         rnn_out, _ = self.model_dec(embedded)
-        rnn_out = self.dropout(rnn_out)  # Apply dropout to RNN output
+        rnn_out = self.dropout(rnn_out)  # Dropout to RNN output
         output = self.fc(rnn_out[:, -1, :])
         return output
 
@@ -257,11 +256,9 @@ def train_lm(args, train_text, dev_text, vocab_index):
     embedding_dim = 128
     hidden_dim = 256
     num_layers = 1
-    #batch_size = 32
     batch_size = 64
-    #learning_rate = 0.005
     learning_rate = 0.001
-    num_epochs = 20
+    num_epochs = 50
     sequence_length = 20
 
     train_text = train_text.lower()
@@ -280,7 +277,7 @@ def train_lm(args, train_text, dev_text, vocab_index):
         X.append(index)
         y.append(target_index)
 
-    X_tensor = torch.tensor(X, dtype=torch.long)  # was dtype = torch.long
+    X_tensor = torch.tensor(X, dtype=torch.long)
     y_tensor = torch.tensor(y, dtype=torch.long)
     dataset = TensorDataset(X_tensor, y_tensor)
     data_loader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
@@ -290,10 +287,10 @@ def train_lm(args, train_text, dev_text, vocab_index):
     criterion = nn.CrossEntropyLoss()
 
     best_loss = float('inf')  # Initialize best loss to a very high value.
-    patience = 10  # Number of epochs to wait for improvement.
+    patience = 5  # Number of epochs to wait for improvement.
     patience_counter = 0
 
-    # List to store the loss values for plotting
+    # List to store values for plotting
     epoch_losses = []
     val_losses = []
 
@@ -334,7 +331,6 @@ def train_lm(args, train_text, dev_text, vocab_index):
         avg_val_loss = total_val_loss / len(dev_text)
         val_losses.append(avg_val_loss)
 
-        #print(f'Epoch [{epoch + 1}/{num_epochs}], Loss: {avg_loss:.4f}')
         print(f'Epoch [{epoch + 1}/{num_epochs}], Loss: {avg_loss:.4f}, Accuracy: {accuracy:.2f}%')
 
         # Check for improvement
@@ -348,9 +344,6 @@ def train_lm(args, train_text, dev_text, vocab_index):
         if patience_counter >= patience:
             print(f"Stopping early at epoch {epoch + 1} due to no improvement.")
             break
-
-        #if (epoch + 1) % 50 == 0:
-            #print(f'Epoch [{epoch + 1}/{num_epochs}], Loss: {total_loss / len(data_loader):.4f}')
 
     # Evaluation: Calculate Perplexity and Likelihood
     model.eval()
