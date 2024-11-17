@@ -216,11 +216,12 @@ class RNNLanguageModel(LanguageModel):
 
     def get_log_prob_single(self, next_char, context):
         self.eval()
-        # context_indices = [self.vocab_index[char] for char in context]
         context_indices = []
+
         for char in context:
             index = self.vocab_index.index_of(char)
             context_indices.append(index)
+
         context_tensor = torch.tensor(context_indices, dtype=torch.long).unsqueeze(0)
         embedded = self.embedding(context_tensor)
         embedded = self.dropout(embedded)
@@ -229,6 +230,7 @@ class RNNLanguageModel(LanguageModel):
         logits = self.fc(last_output)
         log_probs = torch.nn.functional.log_softmax(logits, dim=1)
         target_idx = self.vocab_index.index_of(next_char)
+
         return log_probs[0, target_idx].item()  # Convert tensor to float
 
     def get_log_prob_sequence(self, next_chars, context):
@@ -249,7 +251,6 @@ class RNNLanguageModel(LanguageModel):
         rnn_out = self.dropout(rnn_out)  # Dropout to RNN output
         output = self.fc(rnn_out[:, -1, :])
         return output
-
 
 def train_lm(args, train_text, dev_text, vocab_index):
     vocab_size = len(vocab_index)
@@ -313,10 +314,10 @@ def train_lm(args, train_text, dev_text, vocab_index):
 
         avg_loss = total_loss / len(data_loader)
         epoch_losses.append(avg_loss)
-        accuracy = correct / total * 100  # Convert to percentage
+        accuracy = correct / total * 100
 
         # Validation phase
-        model.eval()  # Set model to evaluation mode
+        model.eval()
         total_val_loss = 0
         for i in range(len(dev_text) - sequence_length):
             context = dev_text[i:i + sequence_length]
@@ -345,7 +346,7 @@ def train_lm(args, train_text, dev_text, vocab_index):
             print(f"Stopping early at epoch {epoch + 1} due to no improvement.")
             break
 
-    # Evaluation: Calculate Perplexity and Likelihood
+    #Calculate Perplexity and Likelihood
     model.eval()
     total_log_likelihood = 0.0
     total_chars = 0
@@ -357,7 +358,7 @@ def train_lm(args, train_text, dev_text, vocab_index):
         total_log_likelihood += log_prob
         total_chars += 1
 
-    # Compute Perplexity
+    
     avg_log_likelihood = total_log_likelihood / total_chars
     perplexity = np.exp(-avg_log_likelihood)
     print(f'Log-Likelihood: {total_log_likelihood:.4f}')
@@ -369,7 +370,7 @@ def train_lm(args, train_text, dev_text, vocab_index):
     plt.title('Training and Validation Loss Over Epochs')
     plt.xlabel('Epoch')
     plt.ylabel('Loss')
-    plt.legend()  # Add a legend to differentiate between the two lines
+    plt.legend() 
     plt.show()
 
     return model
